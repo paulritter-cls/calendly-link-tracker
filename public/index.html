@@ -93,6 +93,15 @@
     <div id="event-type-list"></div>
     <div id="error-settings" class="error" style="display:none"></div>
 
+    <div class="field">
+      <label class="field-label">PERSONAL ACCESS TOKEN</label>
+      <input type="password" id="inp-apikey" placeholder="eyJraWQiOiIxY..." value="" />
+      <p class="hint">
+        Get yours at <a href="https://calendly.com/integrations/api_webhooks" target="_blank">calendly.com → Integrations → API & Webhooks</a>.
+        Stored only in your browser — never sent anywhere except your own serverless proxy.
+      </p>
+    </div>
+
     <div class="webhook-info">
       <strong>Webhook setup (for auto status updates):</strong><br/>
       1. Go to <a href="https://calendly.com/integrations/api_webhooks" target="_blank" style="color:#1d4ed8">Calendly → Webhooks</a><br/>
@@ -135,20 +144,26 @@
 <script>
   const LINKS_KEY = "cal_links_v4";
   const EVENT_URI_KEY = "cal_event_uri_v4";
+  const API_KEY_KEY = "cal_api_key_v4";
 
   let links = (() => { try { return JSON.parse(localStorage.getItem(LINKS_KEY) || "[]"); } catch { return []; } })();
   let eventTypeUri = localStorage.getItem(EVENT_URI_KEY) || "";
+  let apiKey = localStorage.getItem(API_KEY_KEY) || "";
   let eventTypes = [];
 
   const save = () => localStorage.setItem(LINKS_KEY, JSON.stringify(links));
   const persist = (u) => { links = u; save(); render(); };
 
   // -- API calls through our own serverless proxy --
+  // Token is passed via custom header — never in the URL or response body
   async function api(method, path, body) {
     const encodedPath = encodeURIComponent(path);
     const res = await fetch(`/api/calendly?path=${encodedPath}`, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-calendly-token": apiKey,
+      },
       ...(body ? { body: JSON.stringify(body) } : {})
     });
     const data = await res.json();
@@ -308,8 +323,11 @@
 
   document.getElementById("btn-settings").addEventListener("click", () => {
     const p = document.getElementById("panel-settings");
-    p.style.display = p.style.display === "none" ? "block" : "none";
-    // Show webhook URL based on current origin
+    const isOpen = p.style.display !== "none";
+    p.style.display = isOpen ? "none" : "block";
+    // Pre-fill fields from saved values
+    document.getElementById("inp-apikey").value = apiKey;
+    document.getElementById("inp-eventuri").value = eventTypeUri;
     document.getElementById("webhook-url").textContent = `${location.origin}/api/webhook`;
   });
 
@@ -319,6 +337,8 @@
   document.getElementById("inp-label").addEventListener("keydown", e => { if (e.key === "Enter") generateLink(); });
 
   document.getElementById("btn-save-config").addEventListener("click", () => {
+    apiKey = document.getElementById("inp-apikey").value.trim();
+    localStorage.setItem(API_KEY_KEY, apiKey);
     localStorage.setItem(EVENT_URI_KEY, eventTypeUri);
     document.getElementById("panel-settings").style.display = "none";
     document.getElementById("error-settings").style.display = "none";
