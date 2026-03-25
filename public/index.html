@@ -219,34 +219,37 @@
   }
 
   // ── Status checking (uses scheduled_events — the only working approach) ───
+  // Calendly doesn't expose which single-use link was used to book an event.
+  // Best approach: for each active link, check if any event was scheduled
+  // for that event type AFTER the link was created. If so, mark it used.
+  async function checkAndUpdateLink(link, bookedAfter) {
+    if (link.status === "used") return link;
+    // bookedAfter is a Set of ISO date strings representing event creation times
+    // matched to links by checking if any event was created after this link
+    const linkCreated = new Date(link.createdAt).getTime();
+    for (const eventTime of bookedAfter) {
+      if (new Date(eventTime).getTime() >= linkCreated) {
+        const usedAt = new Date().toISOString();
+        await dbUpdateStatus(link.id, "used", usedAt);
+        return { ...link, status: "used", usedAt };
+      }
+    }
+    return link;
+  }
+
   async function fetchBookedSlugs() {
     if (!eventTypeUri) throw new Error("No event type selected — open Settings and save an event type first.");
-    // /scheduled_events requires user= or organization= — fetch and cache user URI if needed
     if (!userUri) {
       const me = await calendly("GET", "/users/me");
       userUri = me.resource.uri;
       localStorage.setItem(LS_USER_URI, userUri);
     }
+    // Get all active events for this specific event type
     const path = `/scheduled_events?user=${userUri}&status=active&count=100`;
     const data = await calendly("GET", path);
-    const events = data.collection || [];
-    // Filter to only events matching our event type, then extract booking URL slugs
-    return new Set(
-      events
-        .filter(e => e.event_type === eventTypeUri)
-        .map(e => e.scheduling_url?.split("/").pop())
-        .filter(Boolean)
-    );
-  }
-
-  async function checkAndUpdateLink(link, bookedSlugs) {
-    if (link.status === "used") return link; // already done
-    if (bookedSlugs.has(link.id)) {
-      const usedAt = new Date().toISOString();
-      await dbUpdateStatus(link.id, "used", usedAt);
-      return { ...link, status: "used", usedAt };
-    }
-    return { ...link, status: "active" };
+    const events = (data.collection || []).filter(e => e.event_type === eventTypeUri);
+    // Return a Set of event created_at times for events of our type
+    return new Set(events.map(e => e.created_at).filter(Boolean));
   }
 
   // ── Load on startup ───────────────────────────────────────────────────────
