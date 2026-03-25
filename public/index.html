@@ -116,13 +116,15 @@
 
 </div>
 <script>
-  const API_KEY_KEY  = "cal_api_key_v4";
-  const EVENT_KEY    = "cal_event_uri_v4";
+  const API_KEY_KEY       = "cal_api_key_v4";
+  const EVENT_KEY         = "cal_event_uri_v4";
+  const EVENT_NAME_KEY    = "cal_event_name_v4";
 
-  let links       = [];
-  let apiKey      = localStorage.getItem(API_KEY_KEY) || "";
+  let links        = [];
+  let apiKey       = localStorage.getItem(API_KEY_KEY) || "";
   let eventTypeUri = localStorage.getItem(EVENT_KEY) || "";
-  let eventTypes  = [];
+  let eventTypeName = localStorage.getItem(EVENT_NAME_KEY) || "";
+  let eventTypes   = [];
 
   const escHtml = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const showErr = (el, msg) => { el.textContent = msg; el.style.display = "block"; };
@@ -195,6 +197,7 @@
             </div>
             <div class="link-url"><a href="${l.url}" target="_blank" rel="noreferrer">${l.url}</a></div>
             <div class="link-meta">
+              ${l.eventName ? `<span style="color:#6366f1;font-weight:500">${escHtml(l.eventName)}</span> · ` : ""}
               Created ${new Date(l.createdAt).toLocaleString()}
               ${l.usedAt ? `· <span class="used-at">Used ${new Date(l.usedAt).toLocaleString()}</span>` : ""}
             </div>
@@ -243,6 +246,7 @@
         uri: `https://api.calendly.com/scheduling_links/${linkSlug}`,
         url: data.resource.booking_url,
         label: label || `Link — ${new Date().toLocaleString()}`,
+        eventName: eventTypeName || null,
         createdAt: new Date().toISOString(),
         status: "active",
         usedAt: null,
@@ -346,7 +350,7 @@
     const el = document.getElementById("event-type-list");
     if (!eventTypes.length) { el.innerHTML = ""; return; }
     el.innerHTML = eventTypes.map(et => `
-      <div class="event-option ${eventTypeUri === et.uri ? "selected" : ""}" data-uri="${et.uri}">
+      <div class="event-option ${eventTypeUri === et.uri ? "selected" : ""}" data-uri="${et.uri}" data-name="${escHtml(et.name)}">
         <span><strong>${escHtml(et.name)}</strong> <span style="color:#9ca3af;font-size:11px">${et.duration} min</span></span>
         ${eventTypeUri === et.uri ? '<span style="color:#6366f1;font-size:12px">✓ Selected</span>' : ""}
       </div>
@@ -367,7 +371,7 @@
     const opt = e.target.closest(".event-option");
     if (opt) {
       eventTypeUri = opt.dataset.uri;
-      // Also update the text field so Save reads the correct value
+      eventTypeName = opt.dataset.name;
       document.getElementById("inp-eventuri").value = eventTypeUri;
       renderEventTypes();
     }
@@ -396,6 +400,7 @@
     if (!eventTypeUri) { showErr(document.getElementById("error-settings"), "Please select or enter an event type."); return; }
     localStorage.setItem(API_KEY_KEY, apiKey);
     localStorage.setItem(EVENT_KEY, eventTypeUri);
+    localStorage.setItem(EVENT_NAME_KEY, eventTypeName);
     document.getElementById("panel-settings").style.display = "none";
     document.getElementById("error-settings").style.display = "none";
   });
