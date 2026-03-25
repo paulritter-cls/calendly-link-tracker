@@ -291,9 +291,10 @@
     const opening = p.style.display === "none";
     p.style.display = opening ? "block" : "none";
     if (opening) {
-      // Pre-fill from saved values
       document.getElementById("inp-apikey").value   = apiKey;
       document.getElementById("inp-eventuri").value = eventTypeUri;
+      // Re-render event type list so selected state is visible
+      if (eventTypes.length) renderEventTypes();
     }
   });
 
@@ -308,8 +309,15 @@
   document.getElementById("inp-label").addEventListener("keydown", e => { if (e.key === "Enter") generateLink(); });
 
   document.getElementById("btn-save-config").addEventListener("click", () => {
-    apiKey       = document.getElementById("inp-apikey").value.trim();
-    eventTypeUri = document.getElementById("inp-eventuri").value.trim();
+    apiKey = document.getElementById("inp-apikey").value.trim();
+    // eventTypeUri is set when user clicks an option from the list,
+    // but also allow manual entry in the text field as a fallback
+    const manualUri = document.getElementById("inp-eventuri").value.trim();
+    if (manualUri) eventTypeUri = manualUri;
+    if (!eventTypeUri) {
+      showErr(document.getElementById("error-settings"), "Please select an event type or paste a URI.");
+      return;
+    }
     localStorage.setItem(API_KEY_KEY, apiKey);
     localStorage.setItem(EVENT_KEY,   eventTypeUri);
     document.getElementById("panel-settings").style.display = "none";
