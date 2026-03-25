@@ -350,7 +350,12 @@
 
   document.getElementById("event-type-list").addEventListener("click", e => {
     const opt = e.target.closest(".event-option");
-    if (opt) { eventTypeUri = opt.dataset.uri; renderEventTypes(); }
+    if (opt) {
+      eventTypeUri = opt.dataset.uri;
+      // Also update the text field so Save reads the correct value
+      document.getElementById("inp-eventuri").value = eventTypeUri;
+      renderEventTypes();
+    }
   });
 
   document.getElementById("btn-settings").addEventListener("click", () => {
