@@ -52,8 +52,6 @@
     .event-option { padding: 9px 12px; border-radius: 8px; border: 2px solid #e5e7eb; cursor: pointer; font-size: 13px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
     .event-option:hover { border-color: #a5b4fc; }
     .event-option.selected { border-color: #6366f1; background: #eef2ff; }
-    .webhook-info { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; font-size: 12px; color: #1e40af; line-height: 1.6; margin-top: 10px; }
-    .webhook-info code { background: #dbeafe; padding: 1px 5px; border-radius: 4px; font-family: monospace; }
     .copied { color: #10b981 !important; }
   </style>
 </head>
@@ -100,14 +98,6 @@
         Get yours at <a href="https://calendly.com/integrations/api_webhooks" target="_blank">calendly.com → Integrations → API & Webhooks</a>.
         Stored only in your browser — never sent anywhere except your own serverless proxy.
       </p>
-    </div>
-
-    <div class="webhook-info">
-      <strong>Webhook setup (for auto status updates):</strong><br/>
-      1. Go to <a href="https://calendly.com/integrations/api_webhooks" target="_blank" style="color:#1d4ed8">Calendly → Webhooks</a><br/>
-      2. Create a new webhook pointing to: <code id="webhook-url">https://YOUR-VERCEL-APP.vercel.app/api/webhook</code><br/>
-      3. Subscribe to events: <code>invitee.created</code> and <code>invitee.canceled</code><br/>
-      4. Copy the signing key and add it as <code>WEBHOOK_SIGNING_KEY</code> in Vercel env vars
     </div>
 
     <button id="btn-save-config" class="primary" style="margin-top:14px">Save Configuration</button>
