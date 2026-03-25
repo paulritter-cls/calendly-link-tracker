@@ -13,12 +13,14 @@ async function ensureTable(sql) {
       url         TEXT NOT NULL,
       label       TEXT NOT NULL,
       event_name  TEXT,
+      event_uri   TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       status      TEXT NOT NULL DEFAULT 'active',
       used_at     TIMESTAMPTZ
     )
   `;
   await sql`ALTER TABLE links ADD COLUMN IF NOT EXISTS event_name TEXT`;
+  await sql`ALTER TABLE links ADD COLUMN IF NOT EXISTS event_uri TEXT`;
 }
 
 export default async function handler(req, res) {
@@ -38,14 +40,14 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
       const rows = await sql`
-        SELECT id, uri, url, label, event_name, created_at, status, used_at
+        SELECT id, uri, url, label, event_name, event_uri, created_at, status, used_at
         FROM links ORDER BY created_at DESC
       `;
       return res.status(200).json({
         links: rows.map(r => ({
           id: r.id, uri: r.uri, url: r.url, label: r.label,
-          eventName: r.event_name, createdAt: r.created_at,
-          status: r.status, usedAt: r.used_at,
+          eventName: r.event_name, eventUri: r.event_uri,
+          createdAt: r.created_at, status: r.status, usedAt: r.used_at,
         }))
       });
     }
@@ -55,10 +57,8 @@ export default async function handler(req, res) {
       if (!id || !url || !label) return res.status(400).json({ error: "Missing required fields" });
       await sql`
         INSERT INTO links (id, uri, url, label, event_name, created_at, status)
-        VALUES (
-          ${id}, ${uri || null}, ${url}, ${label}, ${eventName || null},
-          ${createdAt || new Date().toISOString()}, ${status || "active"}
-        )
+        VALUES (${id}, ${uri || null}, ${url}, ${label}, ${eventName || null},
+          ${createdAt || new Date().toISOString()}, ${status || "active"})
         ON CONFLICT (id) DO NOTHING
       `;
       return res.status(201).json({ ok: true });
@@ -73,8 +73,12 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
       if (!id) return res.status(400).json({ error: "Missing ?id=" });
-      const { status, usedAt } = req.body;
-      await sql`UPDATE links SET status = ${status}, used_at = ${usedAt || null} WHERE id = ${id}`;
+      const { status, usedAt, eventUri } = req.body;
+      await sql`
+        UPDATE links SET status = ${status}, used_at = ${usedAt || null},
+          event_uri = ${eventUri || null}
+        WHERE id = ${id}
+      `;
       return res.status(200).json({ ok: true });
     }
 
