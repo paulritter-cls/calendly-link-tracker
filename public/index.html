@@ -220,6 +220,39 @@
     finally { btn.textContent = "+ Generate"; btn.disabled = false; }
   }
 
+  // Fetch all scheduled events for the event type and use them to
+  // bulk-update link statuses in one API call instead of one-by-one.
+  async function syncFromCalendly() {
+    if (!apiKey || !eventTypeUri) return;
+    try {
+      // Get all active+canceled scheduled events for this event type
+      const data = await api("GET", `/scheduled_events?event_type=${encodeURIComponent(eventTypeUri)}&count=100`);
+      const events = data.collection || [];
+
+      // Build a set of booking_urls that have been used
+      // Each scheduled event has a scheduling_url like https://calendly.com/d/abc-123
+      const bookedSlugs = new Set(
+        events.map(e => e.scheduling_url?.split("/").pop()).filter(Boolean)
+      );
+
+      if (!bookedSlugs.size) return;
+
+      const updated = links.map(l => {
+        if (l.status === "used") return l; // already marked, skip
+        if (bookedSlugs.has(l.id)) {
+          return { ...l, status: "used", usedAt: l.usedAt || new Date().toISOString() };
+        }
+        return l;
+      });
+
+      // Only re-render if something changed
+      const changed = updated.some((l, i) => l.status !== links[i].status);
+      if (changed) persist(updated);
+    } catch(e) {
+      console.warn("Sync failed:", e.message);
+    }
+  }
+
   async function checkStatus(link) {
     try {
       const data = await api("GET", `/scheduling_links/${link.id}`);
@@ -241,9 +274,9 @@
   async function refreshAll() {
     const btn = document.getElementById("btn-refresh-all");
     btn.textContent = "Checking…"; btn.disabled = true;
-    links = links.map(l => l.status !== "used" ? { ...l, status: "checking" } : l);
-    render();
-    const results = await Promise.all(links.map(l => l.status === "checking" ? checkStatus(l) : Promise.resolve(l)));
+    await syncFromCalendly();
+    // For any remaining active links not caught by bulk sync, check individually
+    const results = await Promise.all(links.map(l => l.status === "active" ? checkStatus(l) : Promise.resolve(l)));
     persist(results);
     btn.textContent = "🔄 Refresh All"; btn.disabled = false;
   }
@@ -330,14 +363,11 @@
     document.getElementById("error-settings").style.display = "none";
   });
 
-  // Auto-poll every 30s for active links
-  setInterval(async () => {
-    const hasActive = links.some(l => l.status === "active");
-    if (!hasActive || !apiKey) return;
-    const results = await Promise.all(links.map(l => l.status === "active" ? checkStatus(l) : Promise.resolve(l)));
-    persist(results);
-  }, 30000);
+  // Auto-sync every 30s using a single bulk API call
+  setInterval(syncFromCalendly, 30000);
 
+  // Also sync immediately on load
+  syncFromCalendly();
   render();
 </script>
 </body>
