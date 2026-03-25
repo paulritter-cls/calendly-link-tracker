@@ -79,9 +79,14 @@
         <button id="btn-loadtypes">🔍 Load Types</button>
       </div>
     </div>
-    <div id="event-type-list"></div>
-    <div id="error-settings" class="error" style="display:none"></div>
-    <button id="btn-save-config" class="primary" style="margin-top:4px">Save</button>
+    <div class="field" id="webhook-section">
+      <label class="field-label">Webhook</label>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
+        Registers a Calendly webhook so link statuses update instantly when someone books.
+      </div>
+      <button id="btn-register-webhook">🔗 Register Webhook</button>
+      <div id="webhook-status" style="font-size:12px;margin-top:8px;display:none"></div>
+    </div>
   </div>
 
   <div class="stats">
@@ -354,7 +359,52 @@
     }
   });
 
-  document.getElementById("btn-loadtypes").addEventListener("click", loadEventTypes);
+  // ── Register Webhook ──────────────────────────────────────────────────────
+  async function registerWebhook() {
+    const btn = document.getElementById("btn-register-webhook");
+    const status = document.getElementById("webhook-status");
+    status.style.display = "none";
+    if (!apiKey) { 
+      status.textContent = "⚠️ Save your token first.";
+      status.style.color = "#f59e0b";
+      status.style.display = "block";
+      return;
+    }
+    btn.textContent = "Registering…"; btn.disabled = true;
+    try {
+      // Get user + org URIs
+      const me = await calendly("GET", "/users/me");
+      const userUri = me.resource.uri;
+      const orgUri  = me.resource.current_organization;
+
+      // Register webhook via proxy (keeps token server-side)
+      const webhookUrl = `${window.location.origin}/api/webhook`;
+      const result = await calendly("POST", "/webhook_subscriptions", {
+        url:          webhookUrl,
+        events:       ["invitee.created", "invitee.canceled"],
+        organization: orgUri,
+        user:         userUri,
+        scope:        "user",
+        signing_key:  "auto"  // handled server-side
+      });
+
+      status.textContent = "✅ Webhook registered! Calendly will now push status updates instantly.";
+      status.style.color = "#065f46";
+    } catch (e) {
+      // 409 means webhook already exists — that's fine
+      if (e.message.includes("409") || e.message.toLowerCase().includes("already")) {
+        status.textContent = "✅ Webhook already registered — you're all set.";
+        status.style.color = "#065f46";
+      } else {
+        status.textContent = "❌ Failed: " + e.message;
+        status.style.color = "#dc2626";
+      }
+    }
+    status.style.display = "block";
+    btn.textContent = "🔗 Register Webhook"; btn.disabled = false;
+  }
+
+  document.getElementById("btn-register-webhook").addEventListener("click", registerWebhook);
   document.getElementById("btn-generate").addEventListener("click", generateLink);
   document.getElementById("btn-refresh-all").addEventListener("click", refreshLinks);
   document.getElementById("inp-label").addEventListener("keydown", e => { if (e.key === "Enter") generateLink(); });
