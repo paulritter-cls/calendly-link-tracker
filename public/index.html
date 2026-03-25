@@ -79,11 +79,13 @@
         <button id="btn-loadtypes">🔍 Load Types</button>
       </div>
     </div>
-    <div class="field" id="webhook-section">
+    <div id="event-type-list"></div>
+    <div id="error-settings" class="error" style="display:none"></div>
+    <button id="btn-save-config" class="primary" style="margin-top:4px">Save</button>
+    <hr style="margin:18px 0;border:none;border-top:1px solid #e5e7eb" />
+    <div class="field">
       <label class="field-label">Webhook</label>
-      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">
-        Registers a Calendly webhook so link statuses update instantly when someone books.
-      </div>
+      <p style="font-size:12px;color:#6b7280;margin-bottom:8px">Registers a Calendly webhook so link statuses update instantly when someone books. Requires CALENDLY_WEBHOOK_SECRET in your Vercel env vars first.</p>
       <button id="btn-register-webhook">🔗 Register Webhook</button>
       <div id="webhook-status" style="font-size:12px;margin-top:8px;display:none"></div>
     </div>
@@ -112,19 +114,16 @@
 
 </div>
 <script>
-  // ── Storage keys ──────────────────────────────────────────────────────────
   const LS_API_KEY    = "cal_api_key_v4";
   const LS_EVENT_URI  = "cal_event_uri_v4";
   const LS_EVENT_NAME = "cal_event_name_v4";
 
-  // ── State ─────────────────────────────────────────────────────────────────
   let links         = [];
   let apiKey        = localStorage.getItem(LS_API_KEY)    || "";
   let eventTypeUri  = localStorage.getItem(LS_EVENT_URI)  || "";
   let eventTypeName = localStorage.getItem(LS_EVENT_NAME) || "";
   let eventTypes    = [];
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   const esc     = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const showErr = (el, msg) => { el.textContent = msg; el.style.display = "block"; };
   const hideErr = el => { el.style.display = "none"; };
@@ -133,10 +132,9 @@
     el.textContent = msg; el.style.color = color;
   };
 
-  // ── DB helpers (/api/links) ───────────────────────────────────────────────
   async function dbGet() {
     const r = await fetch("/api/links");
-    if (!r.ok) throw new Error(`GET /api/links failed: ${r.status}`);
+    if (!r.ok) throw new Error("GET /api/links failed: " + r.status);
     return (await r.json()).links;
   }
   async function dbCreate(link) {
@@ -144,11 +142,11 @@
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(link)
     });
-    if (!r.ok) throw new Error(`POST /api/links failed: ${r.status}`);
+    if (!r.ok) throw new Error("POST /api/links failed: " + r.status);
   }
   async function dbDelete(id) {
-    const r = await fetch(`/api/links?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (!r.ok) throw new Error(`DELETE /api/links failed: ${r.status}`);
+    const r = await fetch("/api/links?id=" + encodeURIComponent(id), { method: "DELETE" });
+    if (!r.ok) throw new Error("DELETE /api/links failed: " + r.status);
   }
   async function dbBackfillName(name) {
     await fetch("/api/links?backfill=1", {
@@ -157,19 +155,17 @@
     });
   }
 
-  // ── Calendly proxy (/api/calendly) ────────────────────────────────────────
   async function calendly(method, path, body) {
-    const r = await fetch(`/api/calendly?path=${encodeURIComponent(path)}`, {
+    const r = await fetch("/api/calendly?path=" + encodeURIComponent(path), {
       method,
       headers: { "Content-Type": "application/json", "x-calendly-token": apiKey },
       ...(body ? { body: JSON.stringify(body) } : {})
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.message || data.error || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(data.message || data.error || "HTTP " + r.status);
     return data;
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   function render() {
     const total  = links.length;
     const active = links.filter(l => l.status === "active").length;
@@ -177,47 +173,33 @@
     document.getElementById("stat-total").textContent  = total;
     document.getElementById("stat-active").textContent = active;
     document.getElementById("stat-used").textContent   = used;
-    document.getElementById("links-heading").textContent = `Links (${total})`;
+    document.getElementById("links-heading").textContent = "Links (" + total + ")";
     document.getElementById("btn-refresh-all").style.display = total ? "inline-block" : "none";
-
     const el = document.getElementById("links-list");
     if (!links.length) {
-      el.innerHTML = `<div class="empty"><div class="icon">🔗</div><p>No links yet. Generate your first one above.</p></div>`;
+      el.innerHTML = '<div class="empty"><div class="icon">🔗</div><p>No links yet. Generate your first one above.</p></div>';
       return;
     }
-    el.innerHTML = links.map(l => `
-      <div class="link-item">
-        <div class="link-top">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-              <span class="link-name">${esc(l.label)}</span>
-              <span class="badge badge-${l.status}">
-                <span class="dot"></span>
-                ${l.status.charAt(0).toUpperCase() + l.status.slice(1)}
-              </span>
-            </div>
-            <div class="link-url"><a href="${l.url}" target="_blank" rel="noreferrer">${l.url}</a></div>
-            <div class="link-meta">
-              ${l.eventName ? `<span class="event-tag">${esc(l.eventName)}</span> · ` : ""}
-              Created ${new Date(l.createdAt).toLocaleString()}
-              ${l.usedAt ? ` · <span class="used-at">Used ${new Date(l.usedAt).toLocaleString()}</span>` : ""}
-            </div>
-          </div>
-          <div class="actions">
-            <button class="sm btn-copy"   data-url="${l.url}" title="Copy">📋</button>
-            <button class="sm danger btn-delete" data-id="${l.id}" title="Delete">🗑</button>
-          </div>
-        </div>
-      </div>
-    `).join("");
+    el.innerHTML = links.map(l =>
+      '<div class="link-item"><div class="link-top"><div style="flex:1;min-width:0">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">' +
+      '<span class="link-name">' + esc(l.label) + '</span>' +
+      '<span class="badge badge-' + l.status + '"><span class="dot"></span>' + l.status.charAt(0).toUpperCase() + l.status.slice(1) + '</span></div>' +
+      '<div class="link-url"><a href="' + l.url + '" target="_blank" rel="noreferrer">' + l.url + '</a></div>' +
+      '<div class="link-meta">' + (l.eventName ? '<span class="event-tag">' + esc(l.eventName) + '</span> · ' : '') +
+      'Created ' + new Date(l.createdAt).toLocaleString() +
+      (l.usedAt ? ' · <span class="used-at">Used ' + new Date(l.usedAt).toLocaleString() + '</span>' : '') + '</div>' +
+      '</div><div class="actions">' +
+      '<button class="sm btn-copy" data-url="' + l.url + '" title="Copy">📋</button>' +
+      '<button class="sm danger btn-delete" data-id="' + l.id + '" title="Delete">🗑</button>' +
+      '</div></div></div>'
+    ).join("");
   }
 
-  // ── Load from DB ──────────────────────────────────────────────────────────
   async function loadLinks() {
     setSyncStatus("loading…", "#9ca3af");
     try {
       links = await dbGet();
-      // Backfill event name for rows that don't have one yet
       if (eventTypeName && links.some(l => !l.eventName)) {
         await dbBackfillName(eventTypeName);
         links = await dbGet();
@@ -226,37 +208,30 @@
       setSyncStatus("synced");
     } catch (e) {
       setSyncStatus("error", "#ef4444");
-      document.getElementById("links-list").innerHTML =
-        `<div class="error" style="display:block">Could not load links: ${e.message}</div>`;
+      document.getElementById("links-list").innerHTML = '<div class="error" style="display:block">Could not load links: ' + e.message + '</div>';
     }
   }
 
-  // ── Generate ──────────────────────────────────────────────────────────────
   async function generateLink() {
     const label = document.getElementById("inp-label").value.trim();
     const err   = document.getElementById("error-generate");
     hideErr(err);
     if (!apiKey)       { showErr(err, "Add your Personal Access Token in Settings first."); return; }
     if (!eventTypeUri) { showErr(err, "Select an event type in Settings first."); return; }
-
     const btn = document.getElementById("btn-generate");
     btn.textContent = "Generating…"; btn.disabled = true;
     try {
       const data = await calendly("POST", "/scheduling_links", {
         max_event_count: 1, owner: eventTypeUri, owner_type: "EventType"
       });
-      if (!data.resource?.booking_url) throw new Error("Unexpected response: " + JSON.stringify(data));
-
+      if (!data.resource || !data.resource.booking_url) throw new Error("Unexpected response: " + JSON.stringify(data));
       const slug = data.resource.booking_url.split("/").pop();
       const link = {
-        id:        slug,
-        uri:       `https://api.calendly.com/scheduling_links/${slug}`,
-        url:       data.resource.booking_url,
-        label:     label || `Link — ${new Date().toLocaleString()}`,
+        id: slug, uri: "https://api.calendly.com/scheduling_links/" + slug,
+        url: data.resource.booking_url,
+        label: label || "Link — " + new Date().toLocaleString(),
         eventName: eventTypeName || null,
-        createdAt: new Date().toISOString(),
-        status:    "active",
-        usedAt:    null,
+        createdAt: new Date().toISOString(), status: "active", usedAt: null,
       };
       await dbCreate(link);
       links = [link, ...links];
@@ -270,7 +245,6 @@
     }
   }
 
-  // ── Refresh — just reload from DB (webhook keeps it up to date) ───────────
   async function refreshLinks() {
     const btn = document.getElementById("btn-refresh-all");
     btn.textContent = "Refreshing…"; btn.disabled = true;
@@ -285,18 +259,14 @@
     btn.textContent = "🔄 Refresh"; btn.disabled = false;
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   async function deleteLink(id) {
     try {
       await dbDelete(id);
       links = links.filter(l => l.id !== id);
       render();
-    } catch (e) {
-      alert("Delete failed: " + e.message);
-    }
+    } catch (e) { alert("Delete failed: " + e.message); }
   }
 
-  // ── Load event types ──────────────────────────────────────────────────────
   async function loadEventTypes() {
     const err = document.getElementById("error-settings");
     hideErr(err);
@@ -306,10 +276,10 @@
     btn.textContent = "Loading…"; btn.disabled = true;
     try {
       const me = await calendly("GET", "/users/me");
-      const et = await calendly("GET", `/event_types?user=${encodeURIComponent(me.resource.uri)}&count=50`);
+      const et = await calendly("GET", "/event_types?user=" + encodeURIComponent(me.resource.uri) + "&count=50");
       eventTypes = et.collection || [];
       renderEventTypes();
-      if (!eventTypes.length) showErr(err, "No event types found for this account.");
+      if (!eventTypes.length) showErr(err, "No event types found.");
     } catch (e) {
       showErr(err, "Failed to load: " + e.message);
     } finally {
@@ -320,18 +290,48 @@
   function renderEventTypes() {
     const el = document.getElementById("event-type-list");
     if (!eventTypes.length) { el.innerHTML = ""; return; }
-    el.innerHTML = eventTypes.map(et => `
-      <div class="event-option ${eventTypeUri === et.uri ? "selected" : ""}"
-           data-uri="${et.uri}" data-name="${esc(et.name)}">
-        <span><strong>${esc(et.name)}</strong>
-          <span style="color:#9ca3af;font-size:11px">${et.duration} min</span>
-        </span>
-        ${eventTypeUri === et.uri ? '<span style="color:#6366f1;font-size:12px">✓ Selected</span>' : ""}
-      </div>
-    `).join("");
+    el.innerHTML = eventTypes.map(et =>
+      '<div class="event-option ' + (eventTypeUri === et.uri ? "selected" : "") + '" data-uri="' + et.uri + '" data-name="' + esc(et.name) + '">' +
+      '<span><strong>' + esc(et.name) + '</strong> <span style="color:#9ca3af;font-size:11px">' + et.duration + ' min</span></span>' +
+      (eventTypeUri === et.uri ? '<span style="color:#6366f1;font-size:12px">✓ Selected</span>' : "") +
+      '</div>'
+    ).join("");
   }
 
-  // ── Event listeners ───────────────────────────────────────────────────────
+  async function registerWebhook() {
+    const btn = document.getElementById("btn-register-webhook");
+    const status = document.getElementById("webhook-status");
+    status.style.display = "none";
+    if (!apiKey) {
+      status.textContent = "⚠️ Save your token first.";
+      status.style.color = "#f59e0b"; status.style.display = "block"; return;
+    }
+    btn.textContent = "Registering…"; btn.disabled = true;
+    try {
+      const me = await calendly("GET", "/users/me");
+      await calendly("POST", "/webhook_subscriptions", {
+        url: window.location.origin + "/api/webhook",
+        events: ["invitee.created", "invitee.canceled"],
+        organization: me.resource.current_organization,
+        user: me.resource.uri,
+        scope: "user",
+        signing_key: "auto"
+      });
+      status.textContent = "✅ Webhook registered! Calendly will now push status updates instantly.";
+      status.style.color = "#065f46";
+    } catch (e) {
+      if (e.message.includes("409") || e.message.toLowerCase().includes("already")) {
+        status.textContent = "✅ Webhook already registered — you're all set.";
+        status.style.color = "#065f46";
+      } else {
+        status.textContent = "❌ Failed: " + e.message;
+        status.style.color = "#dc2626";
+      }
+    }
+    status.style.display = "block";
+    btn.textContent = "🔗 Register Webhook"; btn.disabled = false;
+  }
+
   document.getElementById("links-list").addEventListener("click", e => {
     const copy = e.target.closest(".btn-copy");
     const del  = e.target.closest(".btn-delete");
@@ -359,51 +359,7 @@
     }
   });
 
-  // ── Register Webhook ──────────────────────────────────────────────────────
-  async function registerWebhook() {
-    const btn = document.getElementById("btn-register-webhook");
-    const status = document.getElementById("webhook-status");
-    status.style.display = "none";
-    if (!apiKey) { 
-      status.textContent = "⚠️ Save your token first.";
-      status.style.color = "#f59e0b";
-      status.style.display = "block";
-      return;
-    }
-    btn.textContent = "Registering…"; btn.disabled = true;
-    try {
-      // Get user + org URIs
-      const me = await calendly("GET", "/users/me");
-      const userUri = me.resource.uri;
-      const orgUri  = me.resource.current_organization;
-
-      // Register webhook via proxy (keeps token server-side)
-      const webhookUrl = `${window.location.origin}/api/webhook`;
-      const result = await calendly("POST", "/webhook_subscriptions", {
-        url:          webhookUrl,
-        events:       ["invitee.created", "invitee.canceled"],
-        organization: orgUri,
-        user:         userUri,
-        scope:        "user",
-        signing_key:  "auto"  // handled server-side
-      });
-
-      status.textContent = "✅ Webhook registered! Calendly will now push status updates instantly.";
-      status.style.color = "#065f46";
-    } catch (e) {
-      // 409 means webhook already exists — that's fine
-      if (e.message.includes("409") || e.message.toLowerCase().includes("already")) {
-        status.textContent = "✅ Webhook already registered — you're all set.";
-        status.style.color = "#065f46";
-      } else {
-        status.textContent = "❌ Failed: " + e.message;
-        status.style.color = "#dc2626";
-      }
-    }
-    status.style.display = "block";
-    btn.textContent = "🔗 Register Webhook"; btn.disabled = false;
-  }
-
+  document.getElementById("btn-loadtypes").addEventListener("click", loadEventTypes);
   document.getElementById("btn-register-webhook").addEventListener("click", registerWebhook);
   document.getElementById("btn-generate").addEventListener("click", generateLink);
   document.getElementById("btn-refresh-all").addEventListener("click", refreshLinks);
@@ -419,7 +375,6 @@
     hideErr(document.getElementById("error-settings"));
   });
 
-  // ── Init ──────────────────────────────────────────────────────────────────
   loadLinks();
 </script>
 </body>
