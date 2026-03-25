@@ -1,12 +1,3 @@
-/**
- * Link storage API using Neon Postgres.
- * Vercel auto-injects DATABASE_URL when you connect Neon via the Marketplace.
- *
- * GET    /api/links              → get all links
- * POST   /api/links              → create a link  { action:"create", ...linkFields }
- * PATCH  /api/links?id=xxx       → update status  { status, usedAt }
- * DELETE /api/links?id=xxx       → delete a link
- */
 import { neon } from "@neondatabase/serverless";
 
 function getDb() {
@@ -14,7 +5,6 @@ function getDb() {
   return neon(process.env.DATABASE_URL);
 }
 
-// Ensure table exists — runs on every cold start (idempotent)
 async function ensureTable(sql) {
   await sql`
     CREATE TABLE IF NOT EXISTS links (
@@ -22,10 +12,15 @@ async function ensureTable(sql) {
       uri         TEXT,
       url         TEXT NOT NULL,
       label       TEXT NOT NULL,
+      event_name  TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       status      TEXT NOT NULL DEFAULT 'active',
       used_at     TIMESTAMPTZ
     )
+  `;
+  // Add event_name column if table already existed without it
+  await sql`
+    ALTER TABLE links ADD COLUMN IF NOT EXISTS event_name TEXT
   `;
 }
 
@@ -44,45 +39,56 @@ export default async function handler(req, res) {
   }
 
   try {
-    // GET — return all links ordered newest first
+    // GET — return all links newest first
     if (req.method === "GET") {
       const rows = await sql`
-        SELECT id, uri, url, label, created_at, status, used_at
-        FROM links
-        ORDER BY created_at DESC
+        SELECT id, uri, url, label, event_name, created_at, status, used_at
+        FROM links ORDER BY created_at DESC
       `;
-      const links = rows.map(r => ({
-        id: r.id,
-        uri: r.uri,
-        url: r.url,
-        label: r.label,
-        createdAt: r.created_at,
-        status: r.status,
-        usedAt: r.used_at,
-      }));
-      return res.status(200).json({ links });
+      return res.status(200).json({
+        links: rows.map(r => ({
+          id: r.id,
+          uri: r.uri,
+          url: r.url,
+          label: r.label,
+          eventName: r.event_name,
+          createdAt: r.created_at,
+          status: r.status,
+          usedAt: r.used_at,
+        }))
+      });
     }
 
-    // POST — create a new link
+    // POST — create a link
     if (req.method === "POST") {
-      const { id, uri, url, label, createdAt, status } = req.body;
+      const { id, uri, url, label, eventName, createdAt, status } = req.body;
       if (!id || !url || !label) return res.status(400).json({ error: "Missing required fields" });
       await sql`
-        INSERT INTO links (id, uri, url, label, created_at, status)
-        VALUES (${id}, ${uri || null}, ${url}, ${label}, ${createdAt || new Date().toISOString()}, ${status || "active"})
+        INSERT INTO links (id, uri, url, label, event_name, created_at, status)
+        VALUES (
+          ${id}, ${uri || null}, ${url}, ${label}, ${eventName || null},
+          ${createdAt || new Date().toISOString()}, ${status || "active"}
+        )
         ON CONFLICT (id) DO NOTHING
       `;
       return res.status(201).json({ ok: true });
     }
 
-    // PATCH — update status/usedAt
+    // PATCH — update a link's status, or backfill event_name for all null rows
     if (req.method === "PATCH") {
-      const { id } = req.query;
+      const { id, backfill } = req.query;
+
+      if (backfill) {
+        const { eventName } = req.body;
+        if (!eventName) return res.status(400).json({ error: "Missing eventName" });
+        await sql`UPDATE links SET event_name = ${eventName} WHERE event_name IS NULL`;
+        return res.status(200).json({ ok: true });
+      }
+
       if (!id) return res.status(400).json({ error: "Missing ?id=" });
       const { status, usedAt } = req.body;
       await sql`
-        UPDATE links SET status = ${status}, used_at = ${usedAt || null}
-        WHERE id = ${id}
+        UPDATE links SET status = ${status}, used_at = ${usedAt || null} WHERE id = ${id}
       `;
       return res.status(200).json({ ok: true });
     }
