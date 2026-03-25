@@ -3,6 +3,11 @@
  * Accepts the API key from the request header (set by the frontend).
  * This keeps requests server-side (no CORS), without needing
  * an env variable — the user provides their token via the UI.
+ *
+ * Also supports a special bulk status check:
+ *   GET /api/calendly?path=/scheduled_events&event_type=...
+ * which fetches all booked events for an event type so the frontend
+ * can mark links as used in a single request instead of one-by-one.
  */
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
