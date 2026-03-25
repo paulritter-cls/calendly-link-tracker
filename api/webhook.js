@@ -65,11 +65,20 @@ export default async function handler(req, res) {
   const linkId = schedulingUrl.split("/").pop();
   const status = event === "invitee.created" ? "used" : "active";
   const usedAt = event === "invitee.created" ? new Date().toISOString() : null;
+  // Store the event URI so we can look up invitee details later
+  const eventUri = event === "invitee.created"
+    ? (payload.payload?.event?.uri || null)
+    : null;
 
   try {
     const sql = neon(process.env.DATABASE_URL);
-    await sql`UPDATE links SET status = ${status}, used_at = ${usedAt} WHERE id = ${linkId}`;
-    console.log(`Webhook: ${event} -> link ${linkId} set to ${status}`);
+    await sql`
+      UPDATE links
+      SET status = ${status}, used_at = ${usedAt},
+          event_uri = COALESCE(${eventUri}, event_uri)
+      WHERE id = ${linkId}
+    `;
+    console.log(`Webhook: ${event} -> link ${linkId} -> ${status}`);
   } catch (err) {
     console.error("Webhook DB error:", err.message);
     return res.status(500).json({ error: err.message });
