@@ -1,25 +1,22 @@
 /**
  * Serverless proxy for Calendly API calls.
- * Keeps the API key server-side and handles CORS for the frontend.
- *
- * Usage:
- *   GET  /api/calendly?path=/users/me
- *   GET  /api/calendly?path=/event_types%3Fuser%3D...
- *   POST /api/calendly?path=/scheduling_links   body: { ... }
+ * Accepts the API key from the request header (set by the frontend).
+ * This keeps requests server-side (no CORS), without needing
+ * an env variable — the user provides their token via the UI.
  */
 export default async function handler(req, res) {
-  // Allow requests from your own frontend only
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-calendly-token");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
   const { path } = req.query;
   if (!path) return res.status(400).json({ error: "Missing ?path= parameter" });
 
-  const apiKey = process.env.CALENDLY_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "CALENDLY_API_KEY not configured" });
+  // Token comes from the UI via a custom header — never hardcoded
+  const apiKey = req.headers["x-calendly-token"];
+  if (!apiKey) return res.status(401).json({ error: "Missing x-calendly-token header" });
 
   const url = `https://api.calendly.com${path}`;
 
