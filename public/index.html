@@ -38,7 +38,7 @@
     .badge-checking { background: #fef9c3; color: #854d0e; } .badge-checking .dot { background: #facc15; }
     .link-url { font-size: 12px; color: #6366f1; margin: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px; }
     .link-meta { font-size: 11px; color: #9ca3af; }
-    .link-meta .used-at { color: #ef4444; }
+    .used-at { color: #ef4444; }
     .actions { display: flex; gap: 6px; flex-shrink: 0; }
     .empty { text-align: center; padding: 40px 20px; color: #9ca3af; border: 2px dashed #e5e7eb; border-radius: 12px; }
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
@@ -47,25 +47,25 @@
     .field { margin-bottom: 14px; }
     label.field-label { display: block; font-size: 12px; font-weight: 600; color: #6b7280; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.05em; }
     .hint { font-size: 11px; color: #9ca3af; margin-top: 4px; }
-    .hint a { color: #6366f1; }
+    .hint a, a { color: #6366f1; }
     .event-option { padding: 9px 12px; border-radius: 8px; border: 2px solid #e5e7eb; cursor: pointer; font-size: 13px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
     .event-option:hover { border-color: #a5b4fc; }
     .event-option.selected { border-color: #6366f1; background: #eef2ff; }
+    .loading { text-align:center; padding: 30px; color: #9ca3af; font-size: 14px; }
   </style>
 </head>
 <body>
 <div class="wrap">
 
-  <!-- Header -->
   <div class="header">
     <div>
       <h1>📅 Calendly Link Tracker</h1>
-      <p class="subtitle">Generate & monitor single-use scheduling links · <span style="color:#10b981">auto-checking every 30s</span></p>
+      <p class="subtitle">Generate & monitor single-use scheduling links · <span id="sync-status" style="color:#10b981">synced</span></p>
     </div>
     <button id="btn-settings">⚙️ Settings</button>
   </div>
 
-  <!-- Settings panel -->
+  <!-- Settings -->
   <div id="panel-settings" class="card" style="display:none">
     <h3 style="margin-bottom:16px">Configuration</h3>
 
@@ -85,15 +85,14 @@
 
     <div id="event-type-list"></div>
     <div id="error-settings" class="error" style="display:none"></div>
-
     <button id="btn-save-config" class="primary" style="margin-top:4px">Save</button>
   </div>
 
   <!-- Stats -->
   <div class="stats">
-    <div class="stat"><div class="stat-val" id="stat-total" style="color:#6366f1">0</div><div class="stat-lbl">Total</div></div>
-    <div class="stat"><div class="stat-val" id="stat-active" style="color:#10b981">0</div><div class="stat-lbl">Active</div></div>
-    <div class="stat"><div class="stat-val" id="stat-used" style="color:#ef4444">0</div><div class="stat-lbl">Used</div></div>
+    <div class="stat"><div class="stat-val" id="stat-total" style="color:#6366f1">—</div><div class="stat-lbl">Total</div></div>
+    <div class="stat"><div class="stat-val" id="stat-active" style="color:#10b981">—</div><div class="stat-lbl">Active</div></div>
+    <div class="stat"><div class="stat-val" id="stat-used" style="color:#ef4444">—</div><div class="stat-lbl">Used</div></div>
   </div>
 
   <!-- Generate -->
@@ -108,30 +107,58 @@
 
   <!-- Links -->
   <div class="list-header">
-    <h3 id="links-heading">Links (0)</h3>
+    <h3 id="links-heading">Links</h3>
     <button id="btn-refresh-all" style="display:none">🔄 Refresh All</button>
   </div>
   <div id="links-list">
-    <div class="empty"><div class="icon">🔗</div><p>No links yet. Generate your first one above.</p></div>
+    <div class="loading">Loading links…</div>
   </div>
 
 </div>
 <script>
-  const LINKS_KEY    = "cal_links_v4";
-  const EVENT_KEY    = "cal_event_uri_v4";
   const API_KEY_KEY  = "cal_api_key_v4";
+  const EVENT_KEY    = "cal_event_uri_v4";
 
-  let links       = (() => { try { return JSON.parse(localStorage.getItem(LINKS_KEY) || "[]"); } catch { return []; } })();
+  let links       = [];
+  let apiKey      = localStorage.getItem(API_KEY_KEY) || "";
   let eventTypeUri = localStorage.getItem(EVENT_KEY) || "";
-  let apiKey       = localStorage.getItem(API_KEY_KEY) || "";
-  let eventTypes   = [];
+  let eventTypes  = [];
 
-  const save    = () => localStorage.setItem(LINKS_KEY, JSON.stringify(links));
-  const persist = (u) => { links = u; save(); render(); };
-  const escHtml = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const escHtml = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const showErr = (el, msg) => { el.textContent = msg; el.style.display = "block"; };
+  const setSyncStatus = (msg, color="#10b981") => {
+    const el = document.getElementById("sync-status");
+    el.textContent = msg; el.style.color = color;
+  };
 
-  // All Calendly calls go through /api/calendly — token sent via header, never in URL
-  async function api(method, path, body) {
+  // --- DB API ---
+  async function dbGet() {
+    const res = await fetch("/api/links");
+    if (!res.ok) throw new Error("Failed to load links");
+    const { links } = await res.json();
+    return links;
+  }
+  async function dbCreate(link) {
+    const res = await fetch("/api/links", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(link)
+    });
+    if (!res.ok) throw new Error("Failed to save link");
+  }
+  async function dbUpdate(id, status, usedAt) {
+    const res = await fetch(`/api/links?id=${encodeURIComponent(id)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, usedAt: usedAt || null })
+    });
+    if (!res.ok) throw new Error("Failed to update link");
+  }
+  async function dbDelete(id) {
+    const res = await fetch(`/api/links?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Failed to delete link");
+  }
+
+  // --- Calendly API (via proxy) ---
+  async function calendly(method, path, body) {
     const res = await fetch(`/api/calendly?path=${encodeURIComponent(path)}`, {
       method,
       headers: { "Content-Type": "application/json", "x-calendly-token": apiKey },
@@ -142,12 +169,7 @@
     return data;
   }
 
-  // Render
-  function badgeHTML(status) {
-    const labels = { active: "Active", used: "Used", checking: "Checking…" };
-    return `<span class="badge badge-${status}"><span class="dot"></span>${labels[status] || status}</span>`;
-  }
-
+  // --- Render ---
   function render() {
     const total  = links.length;
     const active = links.filter(l => l.status === "active").length;
@@ -164,12 +186,12 @@
       return;
     }
     el.innerHTML = links.map(l => `
-      <div class="link-item" data-id="${l.id}">
+      <div class="link-item">
         <div class="link-top">
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
               <span class="link-name">${escHtml(l.label)}</span>
-              ${badgeHTML(l.status)}
+              <span class="badge badge-${l.status}"><span class="dot"></span>${l.status === "checking" ? "Checking…" : l.status.charAt(0).toUpperCase() + l.status.slice(1)}</span>
             </div>
             <div class="link-url"><a href="${l.url}" target="_blank" rel="noreferrer">${l.url}</a></div>
             <div class="link-meta">
@@ -178,8 +200,8 @@
             </div>
           </div>
           <div class="actions">
-            <button class="sm btn-copy" data-url="${l.url}" title="Copy link">📋</button>
-            <button class="sm btn-refresh" data-id="${l.id}" ${l.status === "checking" ? "disabled" : ""} title="Check status">🔄</button>
+            <button class="sm btn-copy" data-url="${l.url}" title="Copy">📋</button>
+            <button class="sm btn-refresh" data-id="${l.id}" ${l.status==="checking"?"disabled":""} title="Check status">🔄</button>
             <button class="sm danger btn-delete" data-id="${l.id}" title="Delete">🗑</button>
           </div>
         </div>
@@ -187,26 +209,36 @@
     `).join("");
   }
 
-  // Actions
+  // --- Load all links from DB on startup ---
+  async function loadLinks() {
+    try {
+      links = await dbGet();
+      render();
+      setSyncStatus("synced");
+    } catch(e) {
+      setSyncStatus("sync error", "#ef4444");
+      document.getElementById("links-list").innerHTML =
+        `<div class="error" style="display:block">Could not load links: ${e.message}</div>`;
+    }
+  }
+
+  // --- Generate ---
   async function generateLink() {
     const label = document.getElementById("inp-label").value.trim();
     const err   = document.getElementById("error-generate");
     err.style.display = "none";
-    if (!apiKey)       { showErr(err, "Add your Personal Access Token in Settings first."); return; }
-    if (!eventTypeUri) { showErr(err, "Select an event type in Settings first."); return; }
+    if (!apiKey)        { showErr(err, "Add your Personal Access Token in Settings first."); return; }
+    if (!eventTypeUri)  { showErr(err, "Select an event type in Settings first."); return; }
     const btn = document.getElementById("btn-generate");
     btn.textContent = "Generating…"; btn.disabled = true;
     try {
-      const data = await api("POST", "/scheduling_links", {
+      const data = await calendly("POST", "/scheduling_links", {
         max_event_count: 1, owner: eventTypeUri, owner_type: "EventType"
       });
-      if (!data.resource?.booking_url) {
-        throw new Error("Unexpected API response: " + JSON.stringify(data));
-      }
-      // Calendly returns booking_url like https://calendly.com/d/abc-123-xyz
-      // The slug at the end is the link ID we use for status checks
+      if (!data.resource?.booking_url) throw new Error("Unexpected API response: " + JSON.stringify(data));
+
       const linkSlug = data.resource.booking_url.split("/").pop();
-      persist([{
+      const newLink = {
         id: linkSlug,
         uri: `https://api.calendly.com/scheduling_links/${linkSlug}`,
         url: data.resource.booking_url,
@@ -214,85 +246,83 @@
         createdAt: new Date().toISOString(),
         status: "active",
         usedAt: null,
-      }, ...links]);
+      };
+      await dbCreate(newLink);
+      links = [newLink, ...links];
+      render();
       document.getElementById("inp-label").value = "";
-    } catch(e) { showErr(err, "Generate failed: " + e.message); }
-    finally { btn.textContent = "+ Generate"; btn.disabled = false; }
-  }
-
-  // Fetch all scheduled events for the event type and use them to
-  // bulk-update link statuses in one API call instead of one-by-one.
-  async function syncFromCalendly() {
-    if (!apiKey || !eventTypeUri) return;
-    try {
-      // Get all active+canceled scheduled events for this event type
-      const data = await api("GET", `/scheduled_events?event_type=${encodeURIComponent(eventTypeUri)}&count=100`);
-      const events = data.collection || [];
-
-      // Build a set of booking_urls that have been used
-      // Each scheduled event has a scheduling_url like https://calendly.com/d/abc-123
-      const bookedSlugs = new Set(
-        events.map(e => e.scheduling_url?.split("/").pop()).filter(Boolean)
-      );
-
-      if (!bookedSlugs.size) return;
-
-      const updated = links.map(l => {
-        if (l.status === "used") return l; // already marked, skip
-        if (bookedSlugs.has(l.id)) {
-          return { ...l, status: "used", usedAt: l.usedAt || new Date().toISOString() };
-        }
-        return l;
-      });
-
-      // Only re-render if something changed
-      const changed = updated.some((l, i) => l.status !== links[i].status);
-      if (changed) persist(updated);
+      setSyncStatus("synced");
     } catch(e) {
-      console.warn("Sync failed:", e.message);
+      showErr(err, "Generate failed: " + e.message);
+    } finally {
+      btn.textContent = "+ Generate"; btn.disabled = false;
     }
   }
 
+  // --- Check single link status ---
   async function checkStatus(link) {
     try {
-      const data = await api("GET", `/scheduling_links/${link.id}`);
+      const data = await calendly("GET", `/scheduling_links/${link.id}`);
       if (data?.resource) {
         const used = (data.resource.booking_count || 0) >= data.resource.max_event_count;
-        return { ...link, status: used ? "used" : "active", usedAt: used && !link.usedAt ? new Date().toISOString() : link.usedAt };
+        if (used && link.status !== "used") {
+          const usedAt = new Date().toISOString();
+          await dbUpdate(link.id, "used", usedAt);
+          return { ...link, status: "used", usedAt };
+        }
       }
     } catch {}
     return link;
   }
 
+  // --- Refresh one ---
   async function refreshOne(id) {
     links = links.map(l => l.id === id ? { ...l, status: "checking" } : l);
     render();
-    const refreshed = await checkStatus(links.find(l => l.id === id));
-    persist(links.map(l => l.id === id ? refreshed : l));
+    const link    = links.find(l => l.id === id);
+    const updated = await checkStatus(link);
+    links = links.map(l => l.id === id ? updated : l);
+    render();
   }
 
+  // --- Refresh all active links ---
   async function refreshAll() {
     const btn = document.getElementById("btn-refresh-all");
     btn.textContent = "Checking…"; btn.disabled = true;
-    await syncFromCalendly();
-    // For any remaining active links not caught by bulk sync, check individually
-    const results = await Promise.all(links.map(l => l.status === "active" ? checkStatus(l) : Promise.resolve(l)));
-    persist(results);
+    setSyncStatus("checking…", "#facc15");
+    links = links.map(l => l.status === "active" ? { ...l, status: "checking" } : l);
+    render();
+    links = await Promise.all(links.map(l => l.status === "checking" ? checkStatus(l) : Promise.resolve(l)));
+    render();
+    setSyncStatus("synced");
     btn.textContent = "🔄 Refresh All"; btn.disabled = false;
   }
 
+  // --- Delete ---
+  async function deleteLink(id) {
+    try {
+      await dbDelete(id);
+      links = links.filter(l => l.id !== id);
+      render();
+    } catch(e) {
+      alert("Delete failed: " + e.message);
+    }
+  }
+
+  // --- Event types ---
   async function loadEventTypes() {
     const btn = document.getElementById("btn-loadtypes");
     const err = document.getElementById("error-settings");
     err.style.display = "none";
-    if (!apiKey) { showErr(err, "Enter your Personal Access Token first, then click Load Types."); return; }
+    apiKey = document.getElementById("inp-apikey").value.trim();
+    if (!apiKey) { showErr(err, "Enter your Personal Access Token first."); return; }
     btn.textContent = "Loading…"; btn.disabled = true;
     try {
-      const me = await api("GET", "/users/me");
-      const et = await api("GET", `/event_types?user=${encodeURIComponent(me.resource.uri)}&count=50`);
+      const me = await calendly("GET", "/users/me");
+      const et = await calendly("GET", `/event_types?user=${encodeURIComponent(me.resource.uri)}&count=50`);
       eventTypes = et.collection || [];
       renderEventTypes();
-      if (!eventTypes.length) showErr(err, "No event types found for this account.");
+      if (!eventTypes.length) showErr(err, "No event types found.");
     } catch(e) { showErr(err, "Failed to load: " + e.message); }
     finally { btn.textContent = "🔍 Load Types"; btn.disabled = false; }
   }
@@ -300,24 +330,22 @@
   function renderEventTypes() {
     const el = document.getElementById("event-type-list");
     if (!eventTypes.length) { el.innerHTML = ""; return; }
-    el.innerHTML = `<div style="margin-bottom:10px">` + eventTypes.map(et => `
+    el.innerHTML = eventTypes.map(et => `
       <div class="event-option ${eventTypeUri === et.uri ? "selected" : ""}" data-uri="${et.uri}">
         <span><strong>${escHtml(et.name)}</strong> <span style="color:#9ca3af;font-size:11px">${et.duration} min</span></span>
         ${eventTypeUri === et.uri ? '<span style="color:#6366f1;font-size:12px">✓ Selected</span>' : ""}
       </div>
-    `).join("") + `</div>`;
+    `).join("");
   }
 
-  function showErr(el, msg) { el.textContent = msg; el.style.display = "block"; }
-
-  // Event delegation
+  // --- Event listeners ---
   document.getElementById("links-list").addEventListener("click", e => {
     const copy    = e.target.closest(".btn-copy");
     const refresh = e.target.closest(".btn-refresh");
     const del     = e.target.closest(".btn-delete");
     if (copy)    { navigator.clipboard.writeText(copy.dataset.url); copy.textContent = "✅"; setTimeout(() => copy.textContent = "📋", 1500); }
     if (refresh) refreshOne(refresh.dataset.id);
-    if (del)     persist(links.filter(l => l.id !== del.dataset.id));
+    if (del)     deleteLink(del.dataset.id);
   });
 
   document.getElementById("event-type-list").addEventListener("click", e => {
@@ -332,43 +360,33 @@
     if (opening) {
       document.getElementById("inp-apikey").value   = apiKey;
       document.getElementById("inp-eventuri").value = eventTypeUri;
-      // Re-render event type list so selected state is visible
       if (eventTypes.length) renderEventTypes();
     }
   });
 
-  document.getElementById("btn-loadtypes").addEventListener("click", () => {
-    // Read token from field in case user hasn't saved yet
-    apiKey = document.getElementById("inp-apikey").value.trim();
-    loadEventTypes();
-  });
-
+  document.getElementById("btn-loadtypes").addEventListener("click", loadEventTypes);
   document.getElementById("btn-generate").addEventListener("click", generateLink);
   document.getElementById("btn-refresh-all").addEventListener("click", refreshAll);
   document.getElementById("inp-label").addEventListener("keydown", e => { if (e.key === "Enter") generateLink(); });
 
   document.getElementById("btn-save-config").addEventListener("click", () => {
     apiKey = document.getElementById("inp-apikey").value.trim();
-    // eventTypeUri is set when user clicks an option from the list,
-    // but also allow manual entry in the text field as a fallback
     const manualUri = document.getElementById("inp-eventuri").value.trim();
     if (manualUri) eventTypeUri = manualUri;
-    if (!eventTypeUri) {
-      showErr(document.getElementById("error-settings"), "Please select an event type or paste a URI.");
-      return;
-    }
+    if (!eventTypeUri) { showErr(document.getElementById("error-settings"), "Please select or enter an event type."); return; }
     localStorage.setItem(API_KEY_KEY, apiKey);
-    localStorage.setItem(EVENT_KEY,   eventTypeUri);
+    localStorage.setItem(EVENT_KEY, eventTypeUri);
     document.getElementById("panel-settings").style.display = "none";
     document.getElementById("error-settings").style.display = "none";
   });
 
-  // Auto-sync every 30s using a single bulk API call
-  setInterval(syncFromCalendly, 30000);
+  // Auto-refresh active links every 30s
+  setInterval(() => {
+    if (links.some(l => l.status === "active") && apiKey) refreshAll();
+  }, 30000);
 
-  // Also sync immediately on load
-  syncFromCalendly();
-  render();
+  // Load links from DB on startup
+  loadLinks();
 </script>
 </body>
 </html>
