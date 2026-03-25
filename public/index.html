@@ -112,12 +112,14 @@
   const LS_API_KEY    = "cal_api_key_v4";
   const LS_EVENT_URI  = "cal_event_uri_v4";
   const LS_EVENT_NAME = "cal_event_name_v4";
+  const LS_USER_URI   = "cal_user_uri_v4";
 
   // ── State ─────────────────────────────────────────────────────────────────
   let links         = [];
   let apiKey        = localStorage.getItem(LS_API_KEY)    || "";
   let eventTypeUri  = localStorage.getItem(LS_EVENT_URI)  || "";
   let eventTypeName = localStorage.getItem(LS_EVENT_NAME) || "";
+  let userUri       = localStorage.getItem(LS_USER_URI)   || "";
   let eventTypes    = [];
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -219,12 +221,22 @@
   // ── Status checking (uses scheduled_events — the only working approach) ───
   async function fetchBookedSlugs() {
     if (!eventTypeUri) throw new Error("No event type selected — open Settings and save an event type first.");
-    // Build the path without encoding the query string — the proxy encodes the whole path,
-    // so encoding the event_type value here would cause double-encoding
-    const path = `/scheduled_events?event_type=${eventTypeUri}&count=100&status=active`;
+    // /scheduled_events requires user= or organization= — fetch and cache user URI if needed
+    if (!userUri) {
+      const me = await calendly("GET", "/users/me");
+      userUri = me.resource.uri;
+      localStorage.setItem(LS_USER_URI, userUri);
+    }
+    const path = `/scheduled_events?user=${userUri}&status=active&count=100`;
     const data = await calendly("GET", path);
     const events = data.collection || [];
-    return new Set(events.map(e => e.scheduling_url?.split("/").pop()).filter(Boolean));
+    // Filter to only events matching our event type, then extract booking URL slugs
+    return new Set(
+      events
+        .filter(e => e.event_type === eventTypeUri)
+        .map(e => e.scheduling_url?.split("/").pop())
+        .filter(Boolean)
+    );
   }
 
   async function checkAndUpdateLink(link, bookedSlugs) {
@@ -356,6 +368,8 @@
     btn.textContent = "Loading…"; btn.disabled = true;
     try {
       const me = await calendly("GET", "/users/me");
+      userUri = me.resource.uri;
+      localStorage.setItem(LS_USER_URI, userUri);
       const et = await calendly("GET", `/event_types?user=${encodeURIComponent(me.resource.uri)}&count=50`);
       eventTypes = et.collection || [];
       renderEventTypes();
