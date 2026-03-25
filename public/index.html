@@ -1,177 +1,3 @@
-
-Can you help me create a way to generate calendly one time links and then track if they have been used or not?
-
-5:22 PM
-
-Searched available tools
-Searched available tools
-Great — I'll build you a Calendly One-Time Link Manager as an AI-powered artifact. It will let you:
-
-Generate single-use Calendly links via the Calendly API
-Track each link with a label/purpose
-Monitor status — whether the link has been used or is still pending
-To do this you'll need a Calendly API key and your event type UUID. Let me build the app now.
-
-Calendly One-Time Link Manager
-Interactive artifact 
-Here's your Calendly One-Time Link Manager! Here's how to get started:
-
-Setup (one time):
-
-Click ⚙️ Settings
-Enter your Calendly API key — you can get one at calendly.com/integrations/api_webhooks
-Click Load Types to fetch your event types and select one
-Hit Save Configuration
-Using it:
-
-Type a label (e.g. "John Smith – Interview") and click + Generate to create a one-time scheduling link
-Each link shows its status: Active (not yet booked) or Used (someone booked it)
-Hit 🔄 on any link to re-check its status against the Calendly API
-Use Refresh All to update all active links at once
-📋 copies the link to your clipboard so you can share it
-How status checking works: The app queries the Calendly API to see how many bookings have been made on the single-use link. When booking_count reaches the max (1), it flips to Used.
-
-Note: Links and your API key are stored locally in your browser. They'll persist across sessions on this device.
-
-why did it fail to load the event types?
-
-5:57 PM
-Let me check what's happening in the browser to diagnose the issue.
-
-
-Loaded tools, used Claude in Chrome integration
-Loaded tools, used Claude in Chrome integration
-I can't directly inspect the browser, but based on the code I wrote, I can tell you exactly what likely caused the failure. There are a couple of known issues:
-
-Most likely cause: CORS The artifact runs in a sandboxed iframe on claude.ai. When the fetchEventTypes function calls https://api.calendly.com/users/me directly from the browser, Calendly's API may block it due to CORS (Cross-Origin Resource Sharing) restrictions — their API isn't designed to be called directly from browser-side JavaScript.
-
-Other possible causes:
-
-The API key was entered but not yet saved before clicking "Load Types"
-The key is a Personal Access Token vs. an OAuth token (both should work, but worth confirming)
-The fix is to route the API calls through the Anthropic API (Claude as a proxy), which avoids CORS entirely since it runs server-side. Let me rebuild it that way:
-
-Calendly One-Time Link Manager (API-proxied)
-Interactive artifact ∙ Version 2 
-The root cause was a CORS issue. The original version made Calendly API calls directly from the browser, but Calendly's API doesn't allow cross-origin requests from browser-side JavaScript — so every call was blocked before it even reached Calendly.
-
-What's fixed in this version: All Calendly API calls now go through the Anthropic API as a server-side proxy, which sidesteps CORS entirely. The flow is:
-
-Your browser → Anthropic API (server-side) → Calendly API → back to you
-
-Everything else works the same — just open Settings, enter your API key, click 🔍 Load Types, and your event types should now appear correctly.
-
-It failed to load again
-
-6:00 PM
-Let me look at what's actually happening in the browser when it fails.
-
-
-Used Claude in Chrome integration, loaded tools
-Used Claude in Chrome integration, loaded tools
-Let me test the Calendly API call directly to see what error we're actually getting:
-
-
-Used Claude in Chrome integration
-Used Claude in Chrome integration
-Good — now let me test what actually happens when the artifact tries to call the Anthropic API. The issue is that the artifact iframe cannot call api.anthropic.com either — it's also blocked by the sandbox. Let me verify what the real problem is:
-
-
-Used Claude in Chrome integration
-Used Claude in Chrome integration
-That confirms it. The Anthropic API proxy approach also fails — api.anthropic.com requires an API key in the x-api-key header, which the artifact doesn't have access to (the auto-injection only works server-side through Anthropic's own infrastructure, not from browser fetch calls).
-
-The real solution here is to call the Calendly API directly — but we need to work around CORS. The correct approach is to use a lightweight CORS proxy, or better yet, just have you paste your Calendly event type URI manually (which avoids the need to fetch it). Let me rebuild with a direct Calendly API call using a CORS proxy, plus a fallback manual entry option:
-
-Calendly One-Time Link Manager
-Interactive artifact ∙ Version 3 
-Found the real problem. Here's what's actually happening and what I fixed:
-
-Root cause: The artifact runs in a sandboxed iframe that can't make direct calls to api.calendly.com (CORS), and also can't call api.anthropic.com directly from the browser either — that endpoint requires a server-side API key header that isn't available in browser fetch calls.
-
-What's different now:
-
-API calls now route through corsproxy.io, a public CORS proxy that forwards requests server-side, which should work from the iframe
-If that still fails, you can paste your Event Type URI manually — click ? Help for step-by-step instructions on finding it via Calendly's API Explorer or your browser's DevTools
-Try clicking Load Types again. If it still errors, the quickest workaround is to paste the URI directly — it looks like https://api.calendly.com/event_types/XXXXXXXX and takes about 30 seconds to find via the Calendly API Explorer.
-
-would this work better if we moved it all to something like github?
-
-6:04 PM
-Yes, absolutely — moving it to a proper web app would solve all the CORS problems permanently. Here's why it works better and what the options look like:
-
-The core issue is that browser-based apps (like the artifact) can't make direct API calls to Calendly because browsers enforce CORS security policies. A server-side app has no such restrictions.
-
-GitHub Pages alone won't fix it — it's still a static frontend, so you'd hit the same CORS wall. What you actually need is one of these:
-
-Option 1: GitHub Pages + Netlify/Vercel serverless function (recommended)
-
-Your frontend lives on GitHub, deployed via Netlify or Vercel for free
-A tiny serverless function acts as the API proxy (replaces the CORS problem entirely)
-No server to maintain, deploys in seconds, free tier is plenty
-Option 2: Simple Node.js/Express app
-
-Run it locally or host on Railway/Render
-Full control, easy to add a database for persistent link tracking
-Better if you want webhooks (Calendly can ping your server when a link is used — no polling needed)
-Option 3: Netlify/Vercel with a webhook listener (best for auto-status updates)
-
-Calendly can POST to your URL the moment someone books
-Status updates instantly without you needing to manually refresh
-Which direction appeals to you?
-
-Let me know what you'd prefer and I'll generate the full code for you — ready to deploy.
-
-Q: Which setup would you prefer?
-A: Netlify/Vercel + serverless function (easiest)
-
-Q: How should link statuses update?
-A: Calendly webhooks (auto, instant)
-
-6:05 PM
-Great choices. Here's the full project you can deploy to Vercel in about 5 minutes. I'll generate all the files:
-
-Project Structure
-Document 
-vercel.json
-Code 
-.env.example
-Code 
-.gitignore
-Code 
-api/calendly.js
-Code 
-api/webhook.js
-Code 
-public/index.html
-Code 
-Now here's your step-by-step deploy guide:
-
-Deploy Guide
-Document 
-Here's a summary of all the files to create and what each does:
-
-api/calendly.js — The serverless proxy. Your Calendly API key lives here on the server, so it's never exposed to the browser and there's no CORS issue.
-
-api/webhook.js — Listens for Calendly events. The moment someone books a one-time link, Calendly calls this endpoint, it verifies the signature, and stores the "used" status in Vercel KV.
-
-public/index.html — The full frontend. Calls /api/calendly (your own server) instead of Calendly directly, which is why it works.
-
-The deploy flow in ~5 minutes:
-
-Push files to GitHub
-Import repo in Vercel → it auto-deploys
-Add CALENDLY_API_KEY in Vercel env vars
-Create Vercel KV storage (2 clicks)
-Point a Calendly webhook at https://your-app.vercel.app/api/webhook
-Want me to also add a package.json with a local dev script so you can test it before deploying?
-
-
-
-
-
-
-Claude is AI and can make mistakes. Please double-check responses.
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -238,7 +64,7 @@ Claude is AI and can make mistakes. Please double-check responses.
   <div class="header">
     <div>
       <h1>📅 Calendly Link Tracker</h1>
-      <p class="subtitle">Generate & monitor single-use scheduling links</p>
+      <p class="subtitle">Generate & monitor single-use scheduling links · <span id="poll-status" style="color:#10b981">auto-checking every 30s</span></p>
     </div>
     <button id="btn-settings">⚙️ Settings</button>
   </div>
@@ -497,6 +323,17 @@ Claude is AI and can make mistakes. Please double-check responses.
     document.getElementById("panel-settings").style.display = "none";
     document.getElementById("error-settings").style.display = "none";
   });
+
+  // Auto-poll every 30 seconds for active links
+  async function autoPoll() {
+    const active = links.filter(l => l.status === "active");
+    if (!active.length) return;
+    const results = await Promise.all(
+      links.map(l => l.status === "active" ? checkStatus(l) : Promise.resolve(l))
+    );
+    persist(results);
+  }
+  setInterval(autoPoll, 30000);
 
   // Init
   document.getElementById("btn-refresh-all").style.display = links.length ? "inline-block" : "none";
