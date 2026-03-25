@@ -200,6 +200,9 @@
       const data = await api("POST", "/scheduling_links", {
         max_event_count: 1, owner: eventTypeUri, owner_type: "EventType"
       });
+      if (!data.resource?.uri || !data.resource?.booking_url) {
+        throw new Error("Unexpected API response: " + JSON.stringify(data));
+      }
       persist([{
         id: data.resource.uri.split("/").pop(),
         uri: data.resource.uri,
