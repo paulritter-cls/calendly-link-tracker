@@ -279,9 +279,14 @@
   async function refreshOne(id) {
     links = links.map(l => l.id === id ? { ...l, status: "checking" } : l);
     render();
-    const link    = links.find(l => l.id === id);
-    const updated = await checkStatus(link);
-    links = links.map(l => l.id === id ? updated : l);
+    try {
+      const bookedSlugs = await fetchBookedSlugs();
+      const link = links.find(l => l.id === id);
+      const updated = await checkStatus(link, bookedSlugs);
+      links = links.map(l => l.id === id ? updated : l);
+    } catch {
+      links = links.map(l => l.id === id && l.status === "checking" ? { ...l, status: "active" } : l);
+    }
     render();
   }
 
@@ -292,9 +297,19 @@
     setSyncStatus("checking…", "#facc15");
     links = links.map(l => l.status === "active" ? { ...l, status: "checking" } : l);
     render();
-    links = await Promise.all(links.map(l => l.status === "checking" ? checkStatus(l) : Promise.resolve(l)));
+    try {
+      // One API call to get all booked slugs, then check all links against it
+      const bookedSlugs = await fetchBookedSlugs();
+      links = await Promise.all(links.map(l =>
+        l.status === "checking" ? checkStatus(l, bookedSlugs) : Promise.resolve(l)
+      ));
+      setSyncStatus("synced");
+    } catch(e) {
+      setSyncStatus("sync error", "#ef4444");
+      // Reset checking back to active so links aren't stuck
+      links = links.map(l => l.status === "checking" ? { ...l, status: "active" } : l);
+    }
     render();
-    setSyncStatus("synced");
     btn.textContent = "🔄 Refresh All"; btn.disabled = false;
   }
 
@@ -386,8 +401,16 @@
   });
 
   // Auto-refresh active links every 30s
-  setInterval(() => {
-    if (links.some(l => l.status === "active") && apiKey) refreshAll();
+  setInterval(async () => {
+    if (links.some(l => l.status === "active") && apiKey && eventTypeUri) {
+      try {
+        const bookedSlugs = await fetchBookedSlugs();
+        links = await Promise.all(links.map(l =>
+          l.status === "active" ? checkStatus(l, bookedSlugs) : Promise.resolve(l)
+        ));
+        render();
+      } catch {}
+    }
   }, 30000);
 
   // Load links from DB on startup
