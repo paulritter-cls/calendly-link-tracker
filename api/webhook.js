@@ -77,15 +77,21 @@ export default async function handler(req, res) {
       return res.status(201).json({ ok: true });
     }
 
-    // PATCH — update status/usedAt
+    // PATCH — update status/usedAt, or backfill event_name for all null rows
     if (req.method === "PATCH") {
       const { id } = req.query;
+
+      // Bulk backfill: PATCH /api/links?backfill=1 { eventName }
+      if (req.query.backfill) {
+        const { eventName } = req.body;
+        if (!eventName) return res.status(400).json({ error: "Missing eventName" });
+        await sql`UPDATE links SET event_name = ${eventName} WHERE event_name IS NULL`;
+        return res.status(200).json({ ok: true });
+      }
+
       if (!id) return res.status(400).json({ error: "Missing ?id=" });
       const { status, usedAt } = req.body;
-      await sql`
-        UPDATE links SET status = ${status}, used_at = ${usedAt || null}
-        WHERE id = ${id}
-      `;
+      await sql`UPDATE links SET status = ${status}, used_at = ${usedAt || null} WHERE id = ${id}`;
       return res.status(200).json({ ok: true });
     }
 
