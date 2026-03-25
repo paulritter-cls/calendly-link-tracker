@@ -55,30 +55,47 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, skipped: true });
   }
 
-  const schedulingUrl = payload.payload?.event?.scheduling_url ||
-                        payload.payload?.scheduling_url;
+  // In the Calendly webhook payload:
+  // payload.payload.event  = URI string e.g. "https://api.calendly.com/scheduled_events/UUID"
+  // payload.payload.scheduling_link.booking_url = the one-time link URL
+  const eventUri      = payload.payload?.event || null;
+  const bookingUrl    = payload.payload?.scheduling_link?.booking_url || null;
+  const schedulingUrl = bookingUrl || payload.payload?.scheduled_event?.scheduling_url || null;
 
-  if (!schedulingUrl) {
-    return res.status(200).json({ ok: true, skipped: "no scheduling_url" });
+  // Log the full payload structure for debugging (first 500 chars)
+  console.log("Webhook payload keys:", JSON.stringify(Object.keys(payload.payload || {})));
+  console.log("event field:", eventUri);
+  console.log("scheduling_link:", JSON.stringify(payload.payload?.scheduling_link));
+  console.log("booking_url:", bookingUrl);
+
+  if (!schedulingUrl && !eventUri) {
+    return res.status(200).json({ ok: true, skipped: "no scheduling info found", payloadKeys: Object.keys(payload.payload || {}) });
   }
 
-  const linkId = schedulingUrl.split("/").pop();
+  // Extract link ID from booking URL slug, or fall back to event URI slug
+  const linkId = schedulingUrl
+    ? schedulingUrl.split("/").pop()
+    : null;
+
+  if (!linkId) {
+    console.log("Could not determine linkId from payload");
+    return res.status(200).json({ ok: true, skipped: "no linkId", eventUri });
+  }
+
   const status = event === "invitee.created" ? "used" : "active";
   const usedAt = event === "invitee.created" ? new Date().toISOString() : null;
-  // Store the event URI so we can look up invitee details later
-  const eventUri = event === "invitee.created"
-    ? (payload.payload?.event?.uri || null)
-    : null;
+  // eventUri is already the full URI string from payload.payload.event
+  const storedEventUri = event === "invitee.created" ? eventUri : null;
 
   try {
     const sql = neon(process.env.DATABASE_URL);
     await sql`
       UPDATE links
       SET status = ${status}, used_at = ${usedAt},
-          event_uri = COALESCE(${eventUri}, event_uri)
+          event_uri = COALESCE(${storedEventUri}, event_uri)
       WHERE id = ${linkId}
     `;
-    console.log(`Webhook: ${event} -> link ${linkId} -> ${status}`);
+    console.log(`Webhook: ${event} -> link ${linkId} -> ${status}, eventUri: ${storedEventUri}`);
   } catch (err) {
     console.error("Webhook DB error:", err.message);
     return res.status(500).json({ error: err.message });
