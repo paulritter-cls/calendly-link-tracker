@@ -1,17 +1,8 @@
-/**
- * Receives Calendly webhook events and updates link status in Neon Postgres.
- * Calendly POSTs here instantly when someone books or cancels via a one-time link.
- *
- * Setup (one time):
- *   1. Deploy this file
- *   2. Run the curl command in the deploy guide to register the webhook with Calendly
- *   3. Add CALENDLY_WEBHOOK_SECRET to Vercel env vars (any string you choose)
- */
 import crypto from "crypto";
 import { neon } from "@neondatabase/serverless";
 
 export const config = {
-  api: { bodyParser: false }, // need raw body to verify signature
+  api: { bodyParser: false },
 };
 
 function getRawBody(req) {
@@ -24,7 +15,6 @@ function getRawBody(req) {
 }
 
 function verifySignature(rawBody, signatureHeader, secret) {
-  // Calendly signature header format: "t=<timestamp>,v1=<hmac>"
   const parts = Object.fromEntries(
     signatureHeader.split(",").map(p => p.split("=", 2))
   );
@@ -46,7 +36,6 @@ export default async function handler(req, res) {
   const rawBody = await getRawBody(req);
   const secret = process.env.CALENDLY_WEBHOOK_SECRET;
 
-  // Verify signature if secret is configured
   if (secret) {
     const sig = req.headers["calendly-webhook-signature"];
     if (!sig || !verifySignature(rawBody, sig, secret)) {
@@ -66,13 +55,10 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, skipped: true });
   }
 
-  // Extract the booking URL from the event payload
-  // The scheduling_url on the event tells us which one-time link was used
   const schedulingUrl = payload.payload?.event?.scheduling_url ||
                         payload.payload?.scheduling_url;
 
   if (!schedulingUrl) {
-    console.log("Webhook: no scheduling_url in payload", JSON.stringify(payload).slice(0, 300));
     return res.status(200).json({ ok: true, skipped: "no scheduling_url" });
   }
 
@@ -82,11 +68,8 @@ export default async function handler(req, res) {
 
   try {
     const sql = neon(process.env.DATABASE_URL);
-    await sql`
-      UPDATE links SET status = ${status}, used_at = ${usedAt}
-      WHERE id = ${linkId}
-    `;
-    console.log(`Webhook: ${event} → link ${linkId} set to ${status}`);
+    await sql`UPDATE links SET status = ${status}, used_at = ${usedAt} WHERE id = ${linkId}`;
+    console.log(`Webhook: ${event} -> link ${linkId} set to ${status}`);
   } catch (err) {
     console.error("Webhook DB error:", err.message);
     return res.status(500).json({ error: err.message });
